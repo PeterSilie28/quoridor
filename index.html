@@ -1,0 +1,1330 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Quoridor</title>
+<style>
+  /* Größen an einer Stelle, damit man sie leicht ändern kann */
+  :root {
+    color-scheme: dark;
+    --spalt: 14px;  /* Breite der Rille zwischen den Feldern (dort liegen die Mauern) */
+    /* Breite/Höhe eines Spielfelds: höchstens 52px, auf schmalen Handys kleiner, damit das Brett passt */
+    --feld: min(52px, calc((100vw - 32px - 24px - 8 * var(--spalt)) / 9));
+  }
+
+  body {
+    font-family: system-ui, sans-serif;
+    background: #2b2118;
+    color: #f3e9dc;
+    margin: 0;
+    padding-block: 20px;
+    padding-inline: 16px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  h1 { margin: 0 0 12px; }
+
+  /* Handy: etwas schmalere Rillen */
+  @media (max-width: 600px) {
+    :root { --spalt: 11px; }
+  }
+
+  /* Anzeige oben: Spieler 1, Knöpfe, Spieler 2 */
+  .info {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: center;
+    margin-bottom: 10px;
+  }
+  .spieler {
+    padding: 8px 14px;
+    border-radius: 8px;
+    background: #3d3025;
+    border: 3px solid transparent;
+    min-width: 150px;
+    text-align: center;
+  }
+  .spieler.aktiv { border-color: #f3e9dc; }
+  .farbpunkt {
+    display: inline-block;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    vertical-align: middle;
+    margin-right: 6px;
+  }
+  button {
+    font-size: 15px;
+    padding: 8px 14px;
+    border: none;
+    border-radius: 8px;
+    background: #f0c94a;
+    color: #2b2118;
+    cursor: pointer;
+  }
+  button:hover { background: #ffdc6a; }
+  button:disabled { background: #776a55; cursor: default; }
+  select {
+    font-size: 15px;
+    padding: 6px 10px;
+    border-radius: 8px;
+    margin-left: 6px;
+  }
+
+  #meldung {
+    min-height: 24px;
+    margin-bottom: 10px;
+    font-weight: bold;
+    text-align: center;
+  }
+
+  /* Das Brett: 17 Spalten und 17 Zeilen im Wechsel Feld – Rille – Feld – … */
+  #brett {
+    display: grid;
+    grid-template-columns: repeat(8, var(--feld) var(--spalt)) var(--feld);
+    grid-template-rows:    repeat(8, var(--feld) var(--spalt)) var(--feld);
+    background: #5a4330;
+    padding: 12px;
+    border-radius: 10px;
+  }
+
+  .feld {
+    background: #c8a27a;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  /* Zielreihen leicht einfärben: oben ist das Ziel von Rot, unten das von Blau */
+  .feld.zielRot  { box-shadow: inset 0 4px 0 #e04848; }
+  .feld.zielBlau { box-shadow: inset 0 -4px 0 #4a7fe0; }
+  .feld.moeglich { background: #9fd49a; cursor: pointer; }
+  .feld.moeglich:hover { background: #7cc276; }
+
+  /* Unsichtbare Flächen in den Rillen: dort fährt man mit der Maus hin, um eine Mauer zu setzen */
+  .rille { cursor: pointer; z-index: 1; }
+
+  .mauer {
+    background: #f0c94a;
+    border-radius: 4px;
+    z-index: 2;
+    pointer-events: none; /* Mauern sollen Mausklicks nicht abfangen */
+  }
+  .mauer.neu { background: #ffffff; }   /* zuletzt vom Computer gesetzte Mauer */
+  .mauer.vorschau { opacity: 0.55; z-index: 3; }
+  .mauer.vorschau.ungueltig { background: #e04848; }
+  .versteckt { display: none; }
+
+  .figur {
+    width: 70%;
+    height: 70%;
+    border-radius: 50%;
+    box-shadow: 0 3px 6px rgba(0,0,0,0.45);
+  }
+  .rot  { background: #e04848; }
+  .blau { background: #4a7fe0; }
+
+  .anleitung {
+    max-width: 600px;
+    margin-top: 16px;
+    line-height: 1.5;
+    color: #d8c8b4;
+  }
+</style>
+</head>
+<body>
+
+<h1>Quoridor</h1>
+
+<div class="info">
+  <label>Gegner:
+    <select id="gegner">
+      <option value="freund">Freund (2 Spieler)</option>
+      <option value="leicht">Computer – leicht</option>
+      <option value="mittel">Computer – mittel</option>
+      <option value="schwer">Computer – schwer</option>
+      <option value="profi">Computer – Profi (stärkste Stufe)</option>
+    </select>
+  </label>
+</div>
+
+<div class="info">
+  <div class="spieler" id="anzeige0">
+    <span class="farbpunkt rot"></span><b id="name0">Rot</b><br>
+    Mauern übrig: <span id="mauern0">10</span>
+  </div>
+  <button id="rueckgaengig">↶ Rückgängig</button>
+  <button id="neu">Neues Spiel</button>
+  <div class="spieler" id="anzeige1">
+    <span class="farbpunkt blau"></span><b id="name1">Blau</b><br>
+    Mauern übrig: <span id="mauern1">10</span>
+  </div>
+</div>
+
+<div id="meldung"></div>
+<div id="brett"></div>
+
+<div class="anleitung">
+  <b>So wird gespielt:</b> Wer dran ist, macht <b>entweder</b> einen Schritt
+  (auf ein grünes Feld klicken) <b>oder</b> setzt eine Mauer (mit der Maus in eine
+  Rille zwischen den Feldern fahren und klicken; am Handy die Rille einmal antippen
+  für die Vorschau und nochmal tippen zum Setzen). Rot will nach oben, Blau nach unten.
+  Stehen sich die Figuren gegenüber, darf man über die andere springen; ist dahinter
+  eine Mauer, springt man schräg daneben. Eine Mauer darf niemandem den Weg
+  <b>komplett</b> versperren – eine rote Vorschau zeigt, dass sie hier nicht erlaubt ist.
+  Gegen den Computer spielst du Rot und fängst an. Die Stufe „Profi“ nutzt eine eigene,
+  per Selbstspiel abgestimmte Engine und denkt etwa 3 Sekunden pro Zug nach. Die zuletzt gesetzte Mauer des
+  Computers ist weiß, bis du deinen nächsten Zug gemacht hast.
+</div>
+
+<!-- Die "Profi"-Engine: wird als Web Worker gestartet, damit die Seite beim Nachdenken nicht hängt -->
+<script id="engine">
+// Quoridor-Engine (läuft im Browser-Worker und in Node für Tests)
+// Spieler 0 startet unten (Zelle 76) und will in Zeile 0, Spieler 1 startet oben (Zelle 4) und will in Zeile 8.
+// Zellen: index = zeile*9 + spalte. Mauer-Anker: a = zeile*8 + spalte (0..63).
+// Züge als Zahl: 0..80 = Figur auf diese Zelle; 100+a = waagrechte Mauer; 164+a = senkrechte Mauer.
+
+var QEngine = (function () {
+  "use strict";
+  const ROW = new Int8Array(81), COL = new Int8Array(81);
+  for (let i = 0; i < 81; i++) { ROW[i] = (i / 9) | 0; COL[i] = i % 9; }
+  const GOAL = [0, 8];
+  const INF = 99;
+  const H0 = 100, V0 = 164;
+
+  // ---------- Zufallszahlen (reproduzierbar) für Zobrist-Hashing ----------
+  let seed = 0x9E3779B9;
+  function rnd32() { seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5; return seed | 0; }
+  function zarr(n) { const a = new Int32Array(n); for (let i = 0; i < n; i++) a[i] = rnd32(); return a; }
+  const ZP = [zarr(81), zarr(81)], ZP2 = [zarr(81), zarr(81)];
+  const ZH = zarr(64), ZV = zarr(64), ZH2 = zarr(64), ZV2 = zarr(64);
+  const ZW = [zarr(11), zarr(11)], ZW2 = [zarr(11), zarr(11)];
+  const ZT = rnd32(), ZT2 = rnd32();
+
+  function newState() {
+    const s = {
+      pos: Int8Array.of(76, 4), walls: Int8Array.of(10, 10),
+      hW: new Uint8Array(64), vW: new Uint8Array(64),
+      dB: new Uint8Array(81), rB: new Uint8Array(81), // Kante nach unten / nach rechts blockiert
+      turn: 0, k1: 0, k2: 0
+    };
+    rehash(s);
+    return s;
+  }
+  function rehash(s) {
+    let k1 = 0, k2 = 0;
+    for (let p = 0; p < 2; p++) { k1 ^= ZP[p][s.pos[p]] ^ ZW[p][s.walls[p]]; k2 ^= ZP2[p][s.pos[p]] ^ ZW2[p][s.walls[p]]; }
+    for (let a = 0; a < 64; a++) { if (s.hW[a]) { k1 ^= ZH[a]; k2 ^= ZH2[a]; } if (s.vW[a]) { k1 ^= ZV[a]; k2 ^= ZV2[a]; } }
+    if (s.turn) { k1 ^= ZT; k2 ^= ZT2; }
+    s.k1 = k1; s.k2 = k2;
+  }
+  function cloneState(s) {
+    return { pos: Int8Array.from(s.pos), walls: Int8Array.from(s.walls), hW: Uint8Array.from(s.hW), vW: Uint8Array.from(s.vW),
+      dB: Uint8Array.from(s.dB), rB: Uint8Array.from(s.rB), turn: s.turn, k1: s.k1, k2: s.k2 };
+  }
+
+  // Schritt in Richtung d (0 hoch, 1 runter, 2 links, 3 rechts) oder -1
+  function step(s, cell, d) {
+    switch (d) {
+      case 0: return (cell >= 9 && !s.dB[cell - 9]) ? cell - 9 : -1;
+      case 1: return (cell < 72 && !s.dB[cell]) ? cell + 9 : -1;
+      case 2: return (COL[cell] > 0 && !s.rB[cell - 1]) ? cell - 1 : -1;
+      default: return (COL[cell] < 8 && !s.rB[cell]) ? cell + 1 : -1;
+    }
+  }
+  const DELTA = [-9, 9, -1, 1];
+
+  // ---------- Breitensuche ----------
+  const Q = new Int16Array(81), PAR = new Int16Array(81), STAMP = new Int32Array(81), DIST = new Int8Array(81);
+  let stampNo = 1;
+  let bfsCount = 0;
+  function dist(s, p) {
+    bfsCount++;
+    const start = s.pos[p], goal = GOAL[p];
+    if (ROW[start] === goal) return 0;
+    const st = ++stampNo;
+    STAMP[start] = st; DIST[start] = 0;
+    let h = 0, t = 0; Q[t++] = start;
+    while (h < t) {
+      const c = Q[h++], dc = DIST[c] + 1;
+      for (let d = 0; d < 4; d++) {
+        const n = step(s, c, d);
+        if (n >= 0 && STAMP[n] !== st) {
+          if (ROW[n] === goal) return dc;
+          STAMP[n] = st; DIST[n] = dc; Q[t++] = n;
+        }
+      }
+    }
+    return INF;
+  }
+  // Kürzester Weg; markiert in mark[0..127] alle Mauern, die eine Kante dieses Weges blockieren würden.
+  // Bei mehreren gleich kurzen Wegen wird einer gewählt (Richtungsreihenfolge bevorzugt "zum Ziel").
+  const ORDER = [[0, 2, 3, 1], [1, 2, 3, 0]];
+  function pathMarks(s, p, mark) {
+    bfsCount++;
+    mark.fill(0);
+    const start = s.pos[p], goal = GOAL[p];
+    if (ROW[start] === goal) return 0;
+    const st = ++stampNo, ord = ORDER[p];
+    STAMP[start] = st; DIST[start] = 0; PAR[start] = -1;
+    let h = 0, t = 0, end = -1; Q[t++] = start;
+    outer: while (h < t) {
+      const c = Q[h++];
+      for (let i = 0; i < 4; i++) {
+        const n = step(s, c, ord[i]);
+        if (n >= 0 && STAMP[n] !== st) {
+          STAMP[n] = st; DIST[n] = DIST[c] + 1; PAR[n] = c; Q[t++] = n;
+          if (ROW[n] === goal) { end = n; break outer; }
+        }
+      }
+    }
+    if (end < 0) return INF;
+    const len = DIST[end];
+    for (let b = end; PAR[b] >= 0; b = PAR[b]) markEdge(PAR[b], b, mark);
+    return len;
+  }
+  function markEdge(a, b, mark) {
+    if (a > b) { const x = a; a = b; b = x; }
+    const r = ROW[a], c = COL[a];
+    if (b - a === 9) { // senkrechter Schritt -> waagrechte Mauern
+      if (c <= 7) mark[r * 8 + c] = 1;
+      if (c >= 1) mark[r * 8 + c - 1] = 1;
+    } else {           // waagrechter Schritt -> senkrechte Mauern
+      if (r <= 7) mark[64 + r * 8 + c] = 1;
+      if (r >= 1) mark[64 + (r - 1) * 8 + c] = 1;
+    }
+  }
+
+  // ---------- Mauern ----------
+  // w: 0..63 waagrecht, 64..127 senkrecht
+  function wallGeomOK(s, w) {
+    if (w < 64) {
+      const a = w, c = a & 7;
+      return !s.hW[a] && !s.vW[a] && !(c > 0 && s.hW[a - 1]) && !(c < 7 && s.hW[a + 1]);
+    } else {
+      const a = w - 64, r = a >> 3;
+      return !s.vW[a] && !s.hW[a] && !(r > 0 && s.vW[a - 8]) && !(r < 7 && s.vW[a + 8]);
+    }
+  }
+  function setWall(s, w, on) {
+    const v = on ? 1 : -1;
+    if (w < 64) {
+      const a = w, r = a >> 3, c = a & 7, cell = r * 9 + c;
+      s.hW[a] = on ? 1 : 0; s.dB[cell] += v; s.dB[cell + 1] += v; s.k1 ^= ZH[a]; s.k2 ^= ZH2[a];
+    } else {
+      const a = w - 64, r = a >> 3, c = a & 7, cell = r * 9 + c;
+      s.vW[a] = on ? 1 : 0; s.rB[cell] += v; s.rB[cell + 9] += v; s.k1 ^= ZV[a]; s.k2 ^= ZV2[a];
+    }
+  }
+  function setWallCount(s, p, n) {
+    s.k1 ^= ZW[p][s.walls[p]] ^ ZW[p][n]; s.k2 ^= ZW2[p][s.walls[p]] ^ ZW2[p][n]; s.walls[p] = n;
+  }
+  function setPos(s, p, cell) {
+    s.k1 ^= ZP[p][s.pos[p]] ^ ZP[p][cell]; s.k2 ^= ZP2[p][s.pos[p]] ^ ZP2[p][cell]; s.pos[p] = cell;
+  }
+  function flipTurn(s) { s.turn ^= 1; s.k1 ^= ZT; s.k2 ^= ZT2; }
+
+  // Ist Mauer w vollständig erlaubt (Lage + Vorrat + beide haben Weg)?
+  function wallLegal(s, w) {
+    if (s.walls[s.turn] <= 0 || !wallGeomOK(s, w)) return false;
+    setWall(s, w, true);
+    const ok = dist(s, 0) < INF && dist(s, 1) < INF;
+    setWall(s, w, false);
+    return ok;
+  }
+
+  // ---------- Figurenzüge (mit Springen) ----------
+  function pawnMoves(s, p, out) {
+    out.length = 0;
+    const me = s.pos[p], op = s.pos[1 - p];
+    for (let d = 0; d < 4; d++) {
+      const n = step(s, me, d);
+      if (n < 0) continue;
+      if (n !== op) { out.push(n); continue; }
+      const j = step(s, n, d);
+      if (j >= 0) { out.push(j); continue; }
+      const sides = d < 2 ? [2, 3] : [0, 1];
+      for (const sd of sides) { const x = step(s, n, sd); if (x >= 0) out.push(x); }
+    }
+    return out;
+  }
+
+  // ---------- Züge ausführen ----------
+  function makeMove(s, m, undo) {
+    const p = s.turn;
+    if (m < 100) { undo.push(s.pos[p]); setPos(s, p, m); }
+    else { setWall(s, m < V0 ? m - H0 : m - H0, true); setWallCount(s, p, s.walls[p] - 1); }
+    flipTurn(s);
+  }
+  function unmakeMove(s, m, undo) {
+    flipTurn(s);
+    const p = s.turn;
+    if (m < 100) setPos(s, p, undo.pop());
+    else { setWall(s, m - H0, false); setWallCount(s, p, s.walls[p] + 1); }
+  }
+  function isWin(s, p) { return ROW[s.pos[p]] === GOAL[p]; }
+
+  function legalMoves(s) {
+    const res = pawnMoves(s, s.turn, []);
+    if (s.walls[s.turn] > 0) for (let w = 0; w < 128; w++) if (wallLegal(s, w)) res.push(H0 + w);
+    return res;
+  }
+  function isLegal(s, m) {
+    if (m < 100) return pawnMoves(s, s.turn, []).indexOf(m) >= 0;
+    return wallLegal(s, m - H0);
+  }
+
+  return { newState, cloneState, rehash, step, dist, pathMarks, wallGeomOK, wallLegal, setWall, setWallCount, setPos, flipTurn,
+    pawnMoves, makeMove, unmakeMove, isWin, legalMoves, isLegal, ROW, COL, GOAL, INF, H0, V0,
+    bfs: () => bfsCount };
+})();
+
+// Suchalgorithmus für Quoridor: Alpha-Beta (Negamax) mit iterativer Vertiefung,
+// Transpositionstabelle, Killer- und History-Heuristik. Benötigt QEngine.
+var QAI = (function () {
+  "use strict";
+
+  const DEFAULTS = {
+    cand: "pathO",      // welche Mauern im Baum betrachtet werden: "all" | "path" | "pathplus" | "pathO"
+    rootAll: true,      // an der Wurzel immer alle Mauern betrachten
+    stepVal: 100,       // Wert eines Schrittes Wegunterschied
+    tempo: 50,          // Bonus für "ich bin am Zug"
+    wallVal: 130,       // Wert einer Mauer im Vorrat (per Selbstspiel ermittelt)
+    lmr: 8,             // ab dem wievielten Zug reduziert wird (0 = aus)
+    raceVal: 400,       // Bonus/Abzug, wenn das Wettrennen ohne gegnerische Mauern entschieden ist
+    legacy: false,      // altes "schwer"-Verfahren nachbilden (für Vergleiche)
+    maxDepth: 64
+  };
+  const WIN = 100000;
+
+  function create(E, userCfg) {
+    const cfg = Object.assign({}, DEFAULTS, userCfg || {});
+    const TT_BITS = 20, TT_SIZE = 1 << TT_BITS, MASK = TT_SIZE - 1;
+    const ttK1 = new Int32Array(TT_SIZE), ttK2 = new Int32Array(TT_SIZE), ttVal = new Int32Array(TT_SIZE);
+    const ttDepth = new Int8Array(TT_SIZE).fill(-1), ttFlag = new Int8Array(TT_SIZE), ttMove = new Int16Array(TT_SIZE);
+    const MAXPLY = 128;
+    const killers = new Int16Array(MAXPLY * 2).fill(-1);
+    const history = new Int32Array(228);
+    const markP = [], markO = [];
+    for (let i = 0; i < MAXPLY; i++) { markP.push(new Uint8Array(128)); markO.push(new Uint8Array(128)); }
+    const moveBuf = [], keyBuf = [];
+    for (let i = 0; i < MAXPLY; i++) { moveBuf.push(new Int16Array(300)); keyBuf.push(new Float64Array(300)); }
+    const pawnTmp = [];
+    const undo = [];
+    let s, nodes, deadline, stop, nowFn;
+    const pathKeys = new Int32Array(MAXPLY + 2);
+    let histSet = new Set();
+
+    // ---------- Bewertung aus Sicht des Spielers am Zug ----------
+    function evaluate() {
+      const p = s.turn, o = 1 - p;
+      const dP = E.dist(s, p), dO = E.dist(s, o);
+      return evalFrom(dP, dO);
+    }
+    function evalFrom(dP, dO) {
+      const p = s.turn, o = 1 - p, wP = s.walls[p], wO = s.walls[o];
+      if (cfg.legacy) {
+        // alte Bewertung war aus Sicht dessen, der gerade gezogen hat (o) -> umdrehen
+        const race = (dO < dP) ? 1.5 : -1.5;
+        return -Math.round(100 * (dP - dO + race + 0.4 * (wO - wP)));
+      }
+      let v = cfg.stepVal * (dO - dP) + cfg.tempo + cfg.wallVal * (wP - wO);
+      if (wO === 0 && dP <= dO) v += cfg.raceVal;        // ich renne, er kann nichts mehr tun
+      else if (wP === 0 && dP > dO) v -= cfg.raceVal;    // er rennt, ich kann nichts mehr tun
+      return v;
+    }
+
+    // Nachbarschaft einer Mauer (für "pathplus")
+    function addNeighbors(w, set) {
+      const o = w < 64 ? 0 : 64, a = w - o, r = a >> 3, c = a & 7;
+      for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+        const rr = r + dr, cc = c + dc;
+        if (rr < 0 || rr > 7 || cc < 0 || cc > 7) continue;
+        set[o + rr * 8 + cc] = 1;
+      }
+      set[(64 - o) + a] = 1; // andere Ausrichtung, gleicher Anker
+    }
+    const candSet = new Uint8Array(128);
+
+    // Züge erzeugen und sortieren. Gibt Anzahl zurück; Züge in moveBuf[ply], Schlüssel in keyBuf[ply]
+    function genMoves(ply, ttm, mode) {
+      const p = s.turn, o = 1 - p;
+      const mv = moveBuf[ply], ky = keyBuf[ply];
+      let n = 0;
+      const mP = markP[ply], mO = markO[ply];
+      const dP = E.pathMarks(s, p, mP), dO = E.pathMarks(s, o, mO);
+
+      // Figurenzüge
+      E.pawnMoves(s, p, pawnTmp);
+      for (let i = 0; i < pawnTmp.length; i++) {
+        const m = pawnTmp[i];
+        const old = s.pos[p]; s.pos[p] = m; const d = E.dist(s, p); s.pos[p] = old;
+        mv[n] = m; ky[n] = (dP - d) * 1000 + history[m] / 1e6; n++;
+      }
+      // Mauern
+      if (s.walls[p] > 0) {
+        if (mode === "all") candSet.fill(1);
+        else {
+          candSet.fill(0);
+          for (let w = 0; w < 128; w++) if (mO[w]) { candSet[w] = 1; if (mode === "pathplus") addNeighbors(w, candSet); }
+          if (mode === "pathplus") for (let w = 0; w < 128; w++) if (mP[w]) addNeighbors(w, candSet);
+          if (mode === "pathO") for (let w = 0; w < 128; w++) if (mO[w]) addNeighbors(w, candSet);
+        }
+        for (let w = 0; w < 128; w++) {
+          if (!candSet[w] || !E.wallGeomOK(s, w)) continue;
+          E.setWall(s, w, true);
+          const dO2 = mO[w] ? E.dist(s, o) : dO;
+          const dP2 = (dO2 < 99 && mP[w]) ? E.dist(s, p) : dP;
+          E.setWall(s, w, false);
+          if (dO2 >= 99 || dP2 >= 99) continue;
+          const gain = (dO2 - dO) - (dP2 - dP);
+          if (mode !== "all" && cfg.legacy && !mO[w]) continue;
+          mv[n] = 100 + w; ky[n] = gain * 1000 - 500 + history[100 + w] / 1e6; n++;
+        }
+      }
+      // TT-Zug und Killer nach vorne
+      for (let i = 0; i < n; i++) {
+        const m = mv[i];
+        if (m === ttm) ky[i] += 1e7;
+        else if (m === killers[ply * 2]) ky[i] += 5e5;
+        else if (m === killers[ply * 2 + 1]) ky[i] += 4e5;
+      }
+      // Sortieren (Insertion Sort, absteigend)
+      for (let i = 1; i < n; i++) {
+        const m = mv[i], k = ky[i]; let j = i - 1;
+        while (j >= 0 && ky[j] < k) { mv[j + 1] = mv[j]; ky[j + 1] = ky[j]; j--; }
+        mv[j + 1] = m; ky[j + 1] = k;
+      }
+      return n;
+    }
+
+    function search(depth, alpha, beta, ply) {
+      if ((++nodes & 511) === 0 && nowFn() > deadline) stop = true;
+      if (stop) return 0;
+      // Wiederholung (im Suchpfad oder in der bisherigen Partie) = Remis
+      if (histSet.has(s.k1)) return 0;
+      for (let i = ply - 2; i >= 0; i -= 2) if (pathKeys[i] === s.k1) return 0;
+      pathKeys[ply] = s.k1;
+      const idx = s.k1 & MASK;
+      let ttm = -1;
+      if (ttK1[idx] === s.k1 && ttK2[idx] === s.k2 && ttDepth[idx] >= 0) {
+        ttm = ttMove[idx];
+        if (ttDepth[idx] >= depth) {
+          const v = ttVal[idx], f = ttFlag[idx];
+          if (f === 0) return v;
+          if (f === 1 && v >= beta) return v;
+          if (f === 2 && v <= alpha) return v;
+        }
+      }
+      if (depth <= 0 || ply >= MAXPLY - 1) return evaluate();
+
+      const p = s.turn;
+      const n = genMoves(ply, ttm, cfg.cand);
+      const mv = moveBuf[ply];
+      const alpha0 = alpha;
+      let best = -WIN * 2, bestMove = -1;
+      for (let i = 0; i < n; i++) {
+        const m = mv[i];
+        E.makeMove(s, m, undo);
+        let v;
+        if (m < 100 && E.isWin(s, p)) v = WIN - ply;
+        else if (cfg.lmr && depth >= 3 && i >= cfg.lmr && keyBuf[ply][i] < 0) {
+          // späte, unauffällige Züge erst flacher prüfen ("Late Move Reduction")
+          v = -search(depth - 2, -alpha - 1, -alpha, ply + 1);
+          if (v > alpha && !stop) v = -search(depth - 1, -beta, -alpha, ply + 1);
+        }
+        else v = -search(depth - 1, -beta, -alpha, ply + 1);
+        E.unmakeMove(s, m, undo);
+        if (stop) return 0;
+        if (v > best) {
+          best = v; bestMove = m;
+          if (v > alpha) {
+            alpha = v;
+            if (alpha >= beta) {
+              if (killers[ply * 2] !== m) { killers[ply * 2 + 1] = killers[ply * 2]; killers[ply * 2] = m; }
+              history[m] += depth * depth;
+              break;
+            }
+          }
+        }
+      }
+      if (n === 0) return evaluate();
+      ttK1[idx] = s.k1; ttK2[idx] = s.k2; ttVal[idx] = best; ttDepth[idx] = depth; ttMove[idx] = bestMove;
+      ttFlag[idx] = best <= alpha0 ? 2 : (best >= beta ? 1 : 0);
+      return best;
+    }
+
+    // Hauptfunktion: besten Zug für den Spieler am Zug finden
+    function think(state, opts) {
+      opts = opts || {};
+      s = E.cloneState(state);
+      nowFn = opts.now || (() => Date.now());
+      const timeMs = opts.timeMs || 1000;
+      const maxDepth = Math.min(opts.maxDepth || cfg.maxDepth, MAXPLY - 2);
+      deadline = nowFn() + timeMs;
+      stop = false; nodes = 0;
+      histSet = new Set(opts.history || []);
+      pathKeys[0] = s.k1;
+      killers.fill(-1);
+      for (let i = 0; i < history.length; i++) history[i] >>= 2;
+
+      const p = s.turn;
+      // Wurzelzüge (vollständig erlaubt)
+      let n = genMoves(0, -1, cfg.rootAll ? "all" : cfg.cand);
+      let root = Array.from(moveBuf[0].slice(0, n));
+      // sofortiger Sieg?
+      for (const m of root) if (m < 100 && E.ROW[m] === E.GOAL[p]) return { move: m, score: WIN, depth: 0, nodes: 0 };
+
+      let bestMove = root[0], bestScore = -WIN * 2, doneDepth = 0;
+      const scores = new Map();
+      for (let depth = 1; depth <= maxDepth; depth++) {
+        let alpha = -WIN * 2, beta = WIN * 2, iterBest = -1, iterScore = -WIN * 2;
+        for (let i = 0; i < root.length; i++) {
+          const m = root[i];
+          E.makeMove(s, m, undo);
+          let v;
+          if (m < 100 && E.isWin(s, p)) v = WIN;
+          else v = -search(depth - 1, -beta, -alpha, 1);
+          E.unmakeMove(s, m, undo);
+          if (stop) break;
+          scores.set(m, v);
+          if (v > iterScore) { iterScore = v; iterBest = m; }
+          if (v > alpha) alpha = v;
+        }
+        if (stop) {
+          // teilweise Iteration: nur übernehmen, wenn ein besserer Zug als der alte beste gefunden wurde
+          if (iterBest >= 0 && iterBest !== bestMove && iterScore > (scores.get(bestMove) ?? -WIN * 2) && root.indexOf(iterBest) >= 0 && i_firstDone(root, bestMove, scores)) {
+            bestMove = iterBest; bestScore = iterScore;
+          }
+          break;
+        }
+        bestMove = iterBest; bestScore = iterScore; doneDepth = depth;
+        // für die nächste Iteration nach Wert sortieren (bester zuerst)
+        root.sort((a, b) => (scores.get(b) ?? -1e9) - (scores.get(a) ?? -1e9));
+        if (Math.abs(bestScore) >= WIN - 200) break; // Sieg/Niederlage sicher erkannt
+        if (nowFn() > deadline - timeMs * 0.0) { /* weiter, Abbruch passiert in der Suche */ }
+      }
+      return { move: bestMove, score: bestScore, depth: doneDepth, nodes: nodes };
+    }
+    // in der abgebrochenen Iteration wurde der bisher beste Zug (steht vorne) schon fertig gerechnet?
+    function i_firstDone(root, bestMove, scores) { return root[0] === bestMove; }
+
+    return { think, cfg };
+  }
+  return { create, WIN };
+})();
+
+// ---- Verbindung zwischen Spiel und Engine (läuft im Worker oder notfalls im Hauptprogramm) ----
+// z = { pos: [zelleRot, zelleBlau], walls: [mauernRot, mauernBlau], h: ["r,c", ...], v: ["r,c", ...], turn: 0|1 }
+function baueZustand(z) {
+  const E = QEngine, s = E.newState();
+  for (const k of z.h) { const [r, c] = k.split(",").map(Number); E.setWall(s, r * 8 + c, true); }
+  for (const k of z.v) { const [r, c] = k.split(",").map(Number); E.setWall(s, 64 + r * 8 + c, true); }
+  s.pos[0] = z.pos[0]; s.pos[1] = z.pos[1];
+  s.walls[0] = z.walls[0]; s.walls[1] = z.walls[1];
+  s.turn = z.turn;
+  E.rehash(s);
+  return s;
+}
+let profiKI = null;
+function engineDenke(auftrag) {
+  if (profiKI === null) profiKI = QAI.create(QEngine, {});
+  const s = baueZustand(auftrag.aktuell);
+  const verlauf = auftrag.verlauf.map(z => baueZustand(z).k1);
+  return profiKI.think(s, { timeMs: auftrag.zeit, history: verlauf });
+}
+</script>
+
+<script>
+  // =========================================================
+  // 1. EINSTELLUNGEN
+  // =========================================================
+  const GROESSE = 9;              // 9 x 9 Felder
+  const MAUERN_PRO_SPIELER = 10;
+  const ZIELZEILE = [0, 8];       // Rot (Spieler 0) muss in Zeile 0, Blau (Spieler 1) in Zeile 8
+  const RICHTUNGEN = [[-1, 0], [1, 0], [0, -1], [0, 1]]; // hoch, runter, links, rechts
+  const COMPUTER = 1;             // gegen den Computer spielt der Computer immer Blau
+
+  // =========================================================
+  // 2. ZUSTAND (das "Gedächtnis" des Spiels)
+  // =========================================================
+  // Mauern werden über einen Ankerpunkt "zeile,spalte" gespeichert (0 bis 7):
+  //  - waagrechte Mauer bei (r,c): liegt zwischen Zeile r und r+1, über den Spalten c und c+1
+  //  - senkrechte Mauer bei (r,c): liegt zwischen Spalte c und c+1, neben den Zeilen r und r+1
+  let zustand;
+  let verlauf;          // frühere Zustände für "Rückgängig"
+  let gegner = "freund"; // "freund", "leicht", "mittel" oder "schwer"
+  let spielNummer = 0;  // wird bei jedem neuen Spiel/Rückgängig erhöht (siehe computerIstDran)
+
+  function gegenComputer() {
+    return gegner !== "freund";
+  }
+
+  function name(spieler) {
+    if (gegenComputer()) return spieler === COMPUTER ? "Computer" : "Du";
+    return spieler === 0 ? "Rot" : "Blau";
+  }
+
+  function neuesSpiel() {
+    zustand = {
+      figuren: [ { r: 8, c: 4 }, { r: 0, c: 4 } ], // Rot startet unten, Blau oben
+      mauernUebrig: [MAUERN_PRO_SPIELER, MAUERN_PRO_SPIELER],
+      waagrecht: new Set(),
+      senkrecht: new Set(),
+      amZug: 0,           // Rot fängt an
+      gewinner: null,
+      letzteMauer: null   // zuletzt vom Computer gesetzte Mauer (zum Hervorheben)
+    };
+    verlauf = [];
+    spielNummer++;
+    profiAbbrechen();
+    meldung("");
+    zeichnen();
+  }
+
+  // =========================================================
+  // 3. SPIELREGELN (reine Logik, nichts mit Anzeige)
+  // =========================================================
+  function imBrett(r, c) {
+    return r >= 0 && r < GROESSE && c >= 0 && c < GROESSE;
+  }
+
+  // Liegt zwischen zwei benachbarten Feldern eine Mauer?
+  function istBlockiert(r1, c1, r2, c2) {
+    if (c1 === c2) {
+      // Bewegung hoch/runter: eine waagrechte Mauer kann im Weg sein
+      const oben = Math.min(r1, r2);
+      return zustand.waagrecht.has(oben + "," + c1) ||
+             zustand.waagrecht.has(oben + "," + (c1 - 1));
+    } else {
+      // Bewegung links/rechts: eine senkrechte Mauer kann im Weg sein
+      const links = Math.min(c1, c2);
+      return zustand.senkrecht.has(r1 + "," + links) ||
+             zustand.senkrecht.has((r1 - 1) + "," + links);
+    }
+  }
+
+  // Alle Felder, auf die ein Spieler ziehen darf (inklusive Springen)
+  function moeglicheZuege(spieler) {
+    const ich = zustand.figuren[spieler];
+    const anderer = zustand.figuren[1 - spieler];
+    const zuege = [];
+
+    for (const [dr, dc] of RICHTUNGEN) {
+      const r = ich.r + dr;
+      const c = ich.c + dc;
+      if (!imBrett(r, c) || istBlockiert(ich.r, ich.c, r, c)) continue;
+
+      if (r === anderer.r && c === anderer.c) {
+        // Die andere Figur steht direkt daneben -> springen
+        const r2 = r + dr;
+        const c2 = c + dc;
+        if (imBrett(r2, c2) && !istBlockiert(r, c, r2, c2)) {
+          zuege.push({ r: r2, c: c2 });          // gerade drüber
+        } else {
+          // dahinter ist Mauer oder Rand -> schräg daneben
+          const seiten = (dr === 0) ? [[-1, 0], [1, 0]] : [[0, -1], [0, 1]];
+          for (const [sr, sc] of seiten) {
+            const r3 = r + sr;
+            const c3 = c + sc;
+            if (imBrett(r3, c3) && !istBlockiert(r, c, r3, c3)) {
+              zuege.push({ r: r3, c: c3 });
+            }
+          }
+        }
+      } else {
+        zuege.push({ r: r, c: c });              // normaler Schritt
+      }
+    }
+    return zuege;
+  }
+
+  // Breitensuche: Wie viele Schritte braucht der Spieler mindestens bis ins Ziel?
+  // (Figuren werden dabei ignoriert.) Gibt Infinity zurück, wenn es gar keinen Weg gibt.
+  function entfernung(spieler) {
+    const start = zustand.figuren[spieler];
+    const ziel = ZIELZEILE[spieler];
+    const schritte = {};                       // Feld -> Anzahl Schritte vom Start
+    schritte[start.r + "," + start.c] = 0;
+    const warteschlange = [start];
+
+    for (let i = 0; i < warteschlange.length; i++) {
+      const f = warteschlange[i];              // das älteste Feld zuerst ansehen
+      const s = schritte[f.r + "," + f.c];
+      if (f.r === ziel) return s;              // das erste Zielfeld ist automatisch das nächste
+      for (const [dr, dc] of RICHTUNGEN) {
+        const r = f.r + dr;
+        const c = f.c + dc;
+        const schluessel = r + "," + c;
+        if (imBrett(r, c) && !(schluessel in schritte) && !istBlockiert(f.r, f.c, r, c)) {
+          schritte[schluessel] = s + 1;
+          warteschlange.push({ r: r, c: c });
+        }
+      }
+    }
+    return Infinity; // alle erreichbaren Felder durch, Ziel nie erreicht
+  }
+
+  function wegExistiert(spieler) {
+    return entfernung(spieler) !== Infinity;
+  }
+
+  // Überlappt oder kreuzt die Mauer eine vorhandene? (nur die Lage, ohne Wegprüfung)
+  function mauerUeberschneidung(art, r, c) {
+    if (r < 0 || r > GROESSE - 2 || c < 0 || c > GROESSE - 2) return "Die Mauer passt hier nicht aufs Brett.";
+    const k = r + "," + c;
+    if (art === "w") {
+      if (zustand.waagrecht.has(k) ||
+          zustand.waagrecht.has(r + "," + (c - 1)) ||
+          zustand.waagrecht.has(r + "," + (c + 1))) return "Hier liegt schon eine Mauer.";
+      if (zustand.senkrecht.has(k)) return "Mauern dürfen sich nicht kreuzen.";
+    } else {
+      if (zustand.senkrecht.has(k) ||
+          zustand.senkrecht.has((r - 1) + "," + c) ||
+          zustand.senkrecht.has((r + 1) + "," + c)) return "Hier liegt schon eine Mauer.";
+      if (zustand.waagrecht.has(k)) return "Mauern dürfen sich nicht kreuzen.";
+    }
+    return null;
+  }
+
+  // Gibt null zurück, wenn die Mauer erlaubt ist, sonst den Grund als Text
+  function mauerProblem(art, r, c) {
+    if (zustand.gewinner !== null) return "Das Spiel ist vorbei.";
+    if (zustand.mauernUebrig[zustand.amZug] === 0) return name(zustand.amZug) + ": keine Mauern mehr übrig.";
+    const lage = mauerUeberschneidung(art, r, c);
+    if (lage !== null) return lage;
+
+    // Probeweise setzen, prüfen, wieder entfernen
+    const menge = (art === "w") ? zustand.waagrecht : zustand.senkrecht;
+    menge.add(r + "," + c);
+    const beideKommenDurch = wegExistiert(0) && wegExistiert(1);
+    menge.delete(r + "," + c);
+    if (!beideKommenDurch) return "Verboten: Diese Mauer würde einem Spieler den Weg komplett versperren.";
+
+    return null;
+  }
+
+  // =========================================================
+  // 4. AKTIONEN (ein Zug oder eine Mauer – egal ob Mensch oder Computer)
+  // =========================================================
+  function fuehreZugAus(r, c) {
+    verlauf.push(structuredClone(zustand));
+    zustand.figuren[zustand.amZug] = { r: r, c: c };
+    if (r === ZIELZEILE[zustand.amZug]) {
+      zustand.gewinner = zustand.amZug;
+    } else {
+      zustand.amZug = 1 - zustand.amZug;
+    }
+  }
+
+  function fuehreMauerAus(art, r, c) {
+    verlauf.push(structuredClone(zustand));
+    (art === "w" ? zustand.waagrecht : zustand.senkrecht).add(r + "," + c);
+    zustand.mauernUebrig[zustand.amZug]--;
+    zustand.amZug = 1 - zustand.amZug;
+  }
+
+  // --- Klicks des Menschen ---
+  function menschDarf() {
+    return zustand.gewinner === null && !(gegenComputer() && zustand.amZug === COMPUTER);
+  }
+
+  function klickAufFeld(r, c) {
+    if (!menschDarf()) return;
+    const erlaubt = moeglicheZuege(zustand.amZug).some(z => z.r === r && z.c === c);
+    if (!erlaubt) return;
+    fuehreZugAus(r, c);
+    zustand.letzteMauer = null;
+    meldung("");
+    nachDemZug();
+  }
+
+  function klickAufRille(art, r, c) {
+    if (!menschDarf()) return;
+    const problem = mauerProblem(art, r, c);
+    if (problem !== null) {
+      meldung(problem);
+      return;
+    }
+    fuehreMauerAus(art, r, c);
+    zustand.letzteMauer = null;
+    meldung("");
+    vorschau.classList.add("versteckt");
+    nachDemZug();
+  }
+
+  function rueckgaengig() {
+    if (verlauf.length === 0) return;
+    zustand = verlauf.pop();
+    // Gegen den Computer: so weit zurück, bis wieder der Mensch dran ist
+    while (gegenComputer() && zustand.amZug === COMPUTER && verlauf.length > 0) {
+      zustand = verlauf.pop();
+    }
+    spielNummer++;   // ein eventuell noch geplanter Computerzug wird damit ungültig
+    profiAbbrechen();
+    meldung("");
+    nachDemZug();
+  }
+
+  // Nach jedem Zug: neu zeichnen und, falls nötig, den Computer ziehen lassen
+  function nachDemZug() {
+    zeichnen();
+    if (zustand.gewinner === null && gegenComputer() && zustand.amZug === COMPUTER) {
+      meldung("Computer denkt nach …");
+      const nummer = spielNummer;
+      // kurz warten, damit man den eigenen Zug noch sieht
+      setTimeout(() => {
+        if (nummer !== spielNummer) return; // inzwischen neues Spiel oder Rückgängig
+        computerZug();
+      }, 400);
+    }
+  }
+
+  // =========================================================
+  // 5. COMPUTERGEGNER
+  // =========================================================
+  // Grundidee: Wer den kürzeren Weg ins Ziel hat, liegt vorne.
+  // Der Computer probiert jede erlaubte Aktion aus und bewertet die Stellung danach:
+  //   Bewertung = (Weg des Gegners) − (eigener Weg) ± Wettrennen-Bonus + kleiner Bonus für übrige Mauern
+  const MAUER_WERT = 0.4;  // eine Mauer im Vorrat ist etwas wert -> nicht verschwenden
+  const RENNEN_WERT = 1.5; // Bonus/Abzug: würde ich ein reines Wettrennen gewinnen?
+
+  // Alle Aktionen, die ein Spieler gerade machen könnte (Wegprüfung kommt später)
+  function alleAktionen(spieler) {
+    const aktionen = moeglicheZuege(spieler).map(z => ({ typ: "zug", r: z.r, c: z.c }));
+    if (zustand.mauernUebrig[spieler] > 0) {
+      for (const art of ["w", "s"]) {
+        for (let r = 0; r < GROESSE - 1; r++) {
+          for (let c = 0; c < GROESSE - 1; c++) {
+            if (mauerUeberschneidung(art, r, c) === null) aktionen.push({ typ: "mauer", art: art, r: r, c: c });
+          }
+        }
+      }
+    }
+    return aktionen;
+  }
+
+  // Aktion nur zum Ausprobieren ausführen. Gibt eine Funktion zurück, die sie wieder zurücknimmt.
+  function probiere(spieler, a) {
+    if (a.typ === "zug") {
+      const alt = zustand.figuren[spieler];
+      zustand.figuren[spieler] = { r: a.r, c: a.c };
+      return () => { zustand.figuren[spieler] = alt; };
+    }
+    const menge = (a.art === "w") ? zustand.waagrecht : zustand.senkrecht;
+    menge.add(a.r + "," + a.c);
+    zustand.mauernUebrig[spieler]--;
+    return () => { menge.delete(a.r + "," + a.c); zustand.mauernUebrig[spieler]++; };
+  }
+
+  // Bewertung aus Sicht von "spieler", direkt NACH seiner Aktion (der andere ist also als Nächstes dran).
+  // null = Stellung ist verboten (Weg versperrt).
+  function bewertung(spieler) {
+    const meinWeg = entfernung(spieler);
+    const seinWeg = entfernung(1 - spieler);
+    if (meinWeg === Infinity || seinWeg === Infinity) return null;
+    if (meinWeg === 0) return 1000;    // gewonnen
+    if (seinWeg === 0) return -1000;   // verloren
+    // Würden ab jetzt beide nur noch laufen, gewinnt "spieler" nur mit dem echt kürzeren Weg,
+    // weil der andere zuerst ziehen darf. Liegt er hinten, lohnen sich Mauern mehr.
+    const rennen = (meinWeg < seinWeg) ? RENNEN_WERT : -RENNEN_WERT;
+    return seinWeg - meinWeg + rennen +
+           MAUER_WERT * (zustand.mauernUebrig[spieler] - zustand.mauernUebrig[1 - spieler]);
+  }
+
+  // Ein kürzester Weg als Liste von Feldern (Breitensuche, die sich merkt, woher sie kam)
+  function kuerzesterPfad(spieler) {
+    const start = zustand.figuren[spieler];
+    const herkunft = {};                       // Feld -> Feld, von dem aus es erreicht wurde
+    herkunft[start.r + "," + start.c] = null;
+    const warteschlange = [start];
+    for (let i = 0; i < warteschlange.length; i++) {
+      const f = warteschlange[i];
+      if (f.r === ZIELZEILE[spieler]) {
+        // vom Ziel rückwärts zum Start zurückgehen
+        const pfad = [];
+        for (let x = f; x !== null; x = herkunft[x.r + "," + x.c]) pfad.unshift(x);
+        return pfad;
+      }
+      for (const [dr, dc] of RICHTUNGEN) {
+        const r = f.r + dr;
+        const c = f.c + dc;
+        if (imBrett(r, c) && !((r + "," + c) in herkunft) && !istBlockiert(f.r, f.c, r, c)) {
+          herkunft[r + "," + c] = f;
+          warteschlange.push({ r: r, c: c });
+        }
+      }
+    }
+    return [];
+  }
+
+  // Sinnvolle Aktionen: alle Figurenzüge + nur die Mauern, die den kürzesten Weg des Gegners
+  // direkt blockieren. (Alle 128 Mauern durchzurechnen wäre beim Vorausdenken zu langsam.)
+  function kandidaten(spieler) {
+    const aktionen = moeglicheZuege(spieler).map(z => ({ typ: "zug", r: z.r, c: z.c }));
+    if (zustand.mauernUebrig[spieler] === 0) return aktionen;
+
+    const schon = new Set();
+    const pfad = kuerzesterPfad(1 - spieler);
+    for (let i = 0; i + 1 < pfad.length; i++) {
+      const a = pfad[i];
+      const b = pfad[i + 1];
+      let moegliche;
+      if (a.c === b.c) {            // Schritt hoch/runter -> waagrechte Mauern blockieren ihn
+        const oben = Math.min(a.r, b.r);
+        moegliche = [["w", oben, a.c], ["w", oben, a.c - 1]];
+      } else {                      // Schritt links/rechts -> senkrechte Mauern blockieren ihn
+        const links = Math.min(a.c, b.c);
+        moegliche = [["s", a.r, links], ["s", a.r - 1, links]];
+      }
+      for (const [art, r, c] of moegliche) {
+        const k = art + r + "," + c;
+        if (!schon.has(k) && mauerUeberschneidung(art, r, c) === null) {
+          schon.add(k);
+          aktionen.push({ typ: "mauer", art: art, r: r, c: c });
+        }
+      }
+    }
+    return aktionen;
+  }
+
+  // Vorausdenken ("Minimax" mit "Alpha-Beta-Abschneiden"):
+  // "spieler" ist dran und sucht seine beste Aktion – in der Annahme, dass der andere danach
+  // ebenfalls seine beste Aktion wählt, usw. – "tiefe" Halbzüge weit.
+  // Ergebnis: Wert aus Sicht von "spieler".
+  // alpha/beta: Wenn klar ist, dass ein Zweig sowieso schlechter ist, wird er nicht zu Ende gerechnet.
+  function suche(spieler, tiefe, alpha, beta) {
+    let bester = -Infinity;
+    for (const a of kandidaten(spieler)) {
+      const zurueck = probiere(spieler, a);
+      let wert = bewertung(spieler);
+      if (wert !== null && tiefe > 1 && Math.abs(wert) !== 1000) {
+        wert = -suche(1 - spieler, tiefe - 1, -beta, -alpha);  // Sicht des anderen umdrehen
+      }
+      zurueck();
+      if (wert === null) continue;              // verbotene Mauer
+      if (wert > bester) bester = wert;
+      if (bester > alpha) alpha = bester;
+      if (alpha >= beta) break;                 // abschneiden
+    }
+    return bester;
+  }
+
+  // Wie weit der Computer vorausdenkt (in Halbzügen: 1 = nur die eigene Aktion).
+  // Gerade Zahlen sind besser: Bei 3 hätte der Computer immer das "letzte Wort" und würde zu optimistisch.
+  const TIEFE = { leicht: 1, mittel: 2, schwer: 4 };
+
+  function waehleComputerAktion(ich = COMPUTER) {
+    const tiefe = TIEFE[gegner];
+    const aktionen = (gegner === "leicht") ? alleAktionen(ich) : kandidaten(ich);
+    let besteAktion = null;
+    let besterWert = -Infinity;
+
+    for (const a of aktionen) {
+      const zurueck = probiere(ich, a);
+      let wert = bewertung(ich);
+      if (wert !== null && tiefe > 1 && wert !== 1000) {
+        wert = -suche(1 - ich, tiefe - 1, -Infinity, Infinity);
+      }
+      zurueck();
+      if (wert === null) continue;            // verbotene Mauer
+
+      if (gegner === "leicht") {
+        wert += Math.random() * 2.5;            // leicht: absichtlich ungenau
+        if (a.typ === "mauer" && Math.random() < 0.7) continue; // und selten Mauern
+      } else {
+        wert += Math.random() * 0.01;           // bei Gleichstand zufällig wählen
+      }
+      if (wert > besterWert) {
+        besterWert = wert;
+        besteAktion = a;
+      }
+    }
+
+    // Sicherheitsnetz: falls nichts gefunden wurde, einfach irgendeinen erlaubten Schritt
+    if (besteAktion === null) {
+      const z = moeglicheZuege(ich)[0];
+      besteAktion = { typ: "zug", r: z.r, c: z.c };
+    }
+    return besteAktion;
+  }
+
+  function computerZug() {
+    if (gegner === "profi") {
+      profiZug();
+      return;
+    }
+    fuehreComputerAktionAus(waehleComputerAktion());
+  }
+
+  function fuehreComputerAktionAus(a) {
+    if (a.typ === "zug") {
+      fuehreZugAus(a.r, a.c);
+      zustand.letzteMauer = null;
+      meldung("Computer ist gezogen.");
+    } else {
+      fuehreMauerAus(a.art, a.r, a.c);
+      zustand.letzteMauer = a.art + ":" + a.r + "," + a.c;
+      meldung("Computer hat eine Mauer gesetzt.");
+    }
+    zeichnen();
+  }
+
+  // ---------- Profi-Stufe: eigene Engine in einem "Web Worker" ----------
+  // Ein Worker ist ein zweites Programm, das parallel läuft. So kann der Computer
+  // mehrere Sekunden rechnen, ohne dass die Seite einfriert.
+  const PROFI_ZEIT = 3000;   // Bedenkzeit in Millisekunden
+  let profiWorker = null;
+  let profiAuftragNr = 0;
+  let profiBeschaeftigt = false;
+
+  function profiStarten() {
+    try {
+      const code = document.getElementById("engine").textContent +
+        "\nself.onmessage = e => postMessage({ nr: e.data.nr, ergebnis: engineDenke(e.data) });";
+      profiWorker = new Worker(URL.createObjectURL(new Blob([code], { type: "text/javascript" })));
+      profiWorker.onmessage = (e) => profiFertig(e.data.nr, e.data.ergebnis);
+    } catch (fehler) {
+      profiWorker = null;   // Notlösung: im Hauptprogramm rechnen (Seite hängt dann kurz)
+    }
+  }
+
+  // Wenn ein neues Spiel beginnt oder zurückgenommen wird, laufende Rechnung abbrechen
+  function profiAbbrechen() {
+    if (profiBeschaeftigt && profiWorker !== null) {
+      profiWorker.terminate();
+      profiStarten();
+    }
+    profiBeschaeftigt = false;
+  }
+
+  // Spielzustand in das Format der Engine übersetzen
+  function fuerEngine(z) {
+    return {
+      pos: [z.figuren[0].r * 9 + z.figuren[0].c, z.figuren[1].r * 9 + z.figuren[1].c],
+      walls: [z.mauernUebrig[0], z.mauernUebrig[1]],
+      h: [...z.waagrecht],
+      v: [...z.senkrecht],
+      turn: z.amZug
+    };
+  }
+
+  function profiZug() {
+    profiAuftragNr++;
+    const auftrag = {
+      nr: profiAuftragNr,
+      aktuell: fuerEngine(zustand),
+      verlauf: verlauf.map(fuerEngine),  // damit sie Wiederholungen erkennt
+      zeit: PROFI_ZEIT
+    };
+    if (profiWorker !== null) {
+      profiBeschaeftigt = true;
+      profiWorker.postMessage(auftrag);
+    } else {
+      profiFertig(auftrag.nr, engineDenke(auftrag));
+    }
+  }
+
+  function profiFertig(nr, ergebnis) {
+    if (nr !== profiAuftragNr) return;        // veraltete Antwort
+    profiBeschaeftigt = false;
+    if (gegner !== "profi" || zustand.gewinner !== null || zustand.amZug !== COMPUTER) return;
+    // Zugnummer der Engine in eine Aktion übersetzen
+    const m = ergebnis.move;
+    let a;
+    if (m < 100) {
+      a = { typ: "zug", r: Math.floor(m / 9), c: m % 9 };
+    } else {
+      const w = m - 100, anker = w % 64;
+      a = { typ: "mauer", art: w < 64 ? "w" : "s", r: anker >> 3, c: anker & 7 };
+    }
+    // Sicherheitsprüfung: nur erlaubte Aktionen ausführen
+    const erlaubt = (a.typ === "zug")
+      ? moeglicheZuege(COMPUTER).some(z => z.r === a.r && z.c === a.c)
+      : mauerProblem(a.art, a.r, a.c) === null;
+    if (!erlaubt) a = waehleComputerAktion();   // sollte nie passieren
+    fuehreComputerAktionAus(a);
+  }
+
+  // =========================================================
+  // 6. ANZEIGE
+  // =========================================================
+  const brett = document.getElementById("brett");
+  const felder = [];   // felder[r][c] = das HTML-Element des Feldes
+
+  // Ein Element genau an eine Stelle des Rasters setzen (Raster-Zeilen/Spalten beginnen bei 1)
+  function platziere(element, zeile, spalte, zeilenSpanne, spaltenSpanne) {
+    element.style.gridRow = zeile + " / span " + zeilenSpanne;
+    element.style.gridColumn = spalte + " / span " + spaltenSpanne;
+  }
+
+  // Mauer-Element an die richtige Stelle setzen
+  function platziereMauer(element, art, r, c) {
+    if (art === "w") platziere(element, 2 * r + 2, 2 * c + 1, 1, 3);
+    else             platziere(element, 2 * r + 1, 2 * c + 2, 3, 1);
+  }
+
+  // Vorschau-Mauer, die beim Überfahren einer Rille erscheint
+  const vorschau = document.createElement("div");
+  vorschau.className = "mauer vorschau versteckt";
+  brett.appendChild(vorschau);
+
+  // Am Handy gibt es kein "Drüberfahren" mit der Maus. Deshalb: 1. Tippen zeigt die Mauer, 2. Tippen setzt sie.
+  const TOUCH = window.matchMedia("(hover: none)").matches;
+  let vorgemerkt = null;   // welche Mauer gerade als Vorschau angetippt ist
+
+  function tippAufRille(art, r, c) {
+    const k = art + ":" + r + "," + c;
+    if (!TOUCH || vorgemerkt === k) {
+      vorgemerkt = null;
+      klickAufRille(art, r, c);
+      return;
+    }
+    if (!menschDarf()) return;
+    vorgemerkt = k;
+    zeigeVorschau(art, r, c);
+    const problem = mauerProblem(art, r, c);
+    meldung(problem !== null ? problem : "Nochmal tippen, um die Mauer zu setzen.");
+  }
+
+  function zeigeVorschau(art, r, c) {
+    if (!menschDarf()) return;
+    platziereMauer(vorschau, art, r, c);
+    vorschau.classList.remove("versteckt");
+    vorschau.classList.toggle("ungueltig", mauerProblem(art, r, c) !== null);
+  }
+
+  // Das Brett einmal aufbauen: Felder und unsichtbare Rillen-Flächen
+  function brettAufbauen() {
+    for (let r = 0; r < GROESSE; r++) {
+      felder.push([]);
+      for (let c = 0; c < GROESSE; c++) {
+        const feld = document.createElement("div");
+        feld.className = "feld";
+        if (r === ZIELZEILE[0]) feld.classList.add("zielRot");
+        if (r === ZIELZEILE[1]) feld.classList.add("zielBlau");
+        platziere(feld, 2 * r + 1, 2 * c + 1, 1, 1);
+        feld.addEventListener("click", () => {
+          if (vorgemerkt !== null) { vorgemerkt = null; vorschau.classList.add("versteckt"); }
+          klickAufFeld(r, c);
+        });
+        brett.appendChild(feld);
+        felder[r].push(feld);
+
+        // Waagrechte Rille unter diesem Feld (nicht unter der letzten Zeile)
+        if (r < GROESSE - 1) {
+          const rille = document.createElement("div");
+          rille.className = "rille";
+          platziere(rille, 2 * r + 2, 2 * c + 1, 1, 1);
+          const anker = Math.min(c, GROESSE - 2); // ganz rechts: Mauer nach links verschieben
+          if (!TOUCH) {   // Maus: Vorschau beim Drüberfahren
+            rille.addEventListener("mouseenter", () => zeigeVorschau("w", r, anker));
+            rille.addEventListener("mouseleave", () => vorschau.classList.add("versteckt"));
+          }
+          rille.addEventListener("click", () => tippAufRille("w", r, anker));
+          brett.appendChild(rille);
+        }
+
+        // Senkrechte Rille rechts neben diesem Feld (nicht neben der letzten Spalte)
+        if (c < GROESSE - 1) {
+          const rille = document.createElement("div");
+          rille.className = "rille";
+          platziere(rille, 2 * r + 1, 2 * c + 2, 1, 1);
+          const anker = Math.min(r, GROESSE - 2); // ganz unten: Mauer nach oben verschieben
+          if (!TOUCH) {   // Maus: Vorschau beim Drüberfahren
+            rille.addEventListener("mouseenter", () => zeigeVorschau("s", anker, c));
+            rille.addEventListener("mouseleave", () => vorschau.classList.add("versteckt"));
+          }
+          rille.addEventListener("click", () => tippAufRille("s", anker, c));
+          brett.appendChild(rille);
+        }
+      }
+    }
+  }
+
+  // Alles anzeigen, was sich ändern kann
+  function zeichnen() {
+    vorgemerkt = null;
+    // Felder leeren
+    for (let r = 0; r < GROESSE; r++) {
+      for (let c = 0; c < GROESSE; c++) {
+        felder[r][c].innerHTML = "";
+        felder[r][c].classList.remove("moeglich");
+      }
+    }
+
+    // Figuren
+    zustand.figuren.forEach((f, i) => {
+      const figur = document.createElement("div");
+      figur.className = "figur " + (i === 0 ? "rot" : "blau");
+      felder[f.r][f.c].appendChild(figur);
+    });
+
+    // Mögliche Züge grün markieren (nur wenn ein Mensch dran ist)
+    if (menschDarf()) {
+      for (const z of moeglicheZuege(zustand.amZug)) {
+        felder[z.r][z.c].classList.add("moeglich");
+      }
+    }
+
+    // Gesetzte Mauern neu zeichnen
+    brett.querySelectorAll(".mauer:not(.vorschau)").forEach(m => m.remove());
+    for (const k of zustand.waagrecht) neueMauer("w", k);
+    for (const k of zustand.senkrecht) neueMauer("s", k);
+
+    // Info-Leiste
+    for (let i = 0; i < 2; i++) {
+      document.getElementById("name" + i).textContent = name(i);
+      document.getElementById("mauern" + i).textContent = zustand.mauernUebrig[i];
+      document.getElementById("anzeige" + i).classList.toggle("aktiv",
+        zustand.gewinner === null && zustand.amZug === i);
+    }
+    document.getElementById("rueckgaengig").disabled = verlauf.length === 0;
+
+    if (zustand.gewinner !== null) {
+      if (gegenComputer()) {
+        meldung(zustand.gewinner === COMPUTER ? "Der Computer hat gewonnen." : "🏆 Du hast gewonnen!");
+      } else {
+        meldung("🏆 " + name(zustand.gewinner) + " hat gewonnen!");
+      }
+      vorschau.classList.add("versteckt");
+    } else if (menschDarf()) {
+      const davor = document.getElementById("meldung").textContent;
+      const hinweis = gegenComputer() ? "Du bist dran." : name(zustand.amZug) + " ist dran.";
+      if (davor === "") meldung(hinweis);
+      else if (!davor.endsWith(hinweis)) meldung(davor + " " + hinweis);
+    }
+  }
+
+  function neueMauer(art, schluessel) {
+    const [r, c] = schluessel.split(",").map(Number);
+    const mauer = document.createElement("div");
+    mauer.className = "mauer";
+    if (zustand.letzteMauer === art + ":" + schluessel) mauer.classList.add("neu");
+    platziereMauer(mauer, art, r, c);
+    brett.appendChild(mauer);
+  }
+
+  function meldung(text) {
+    document.getElementById("meldung").textContent = text;
+  }
+
+  // =========================================================
+  // 7. START
+  // =========================================================
+  document.getElementById("neu").addEventListener("click", neuesSpiel);
+  document.getElementById("rueckgaengig").addEventListener("click", rueckgaengig);
+  document.getElementById("gegner").addEventListener("change", (e) => {
+    gegner = e.target.value;
+    neuesSpiel();
+  });
+  profiStarten();
+  brettAufbauen();
+  neuesSpiel();
+</script>
+</body>
+</html>
